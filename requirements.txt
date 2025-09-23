@@ -135,7 +135,7 @@ duckdb
 # - For Apache Arrow/Parquet support.
 # - Optional: enhances DuckDB and Pandas interoperability.
 # Uncomment the line below to install pyarrow.
-# pyarrow
+pyarrow
 
 # duckdb-engine
 # - Optional SQLAlchemy dialect for DuckDB.
@@ -146,7 +146,7 @@ duckdb
 # SQLAlchemy
 # - Very popular toolkit/ORM to unify DB access across SQLite, Postgres, MySQL, etc.
 # Uncomment the line below to install SQLAlchemy.
-# SQLAlchemy
+SQLAlchemy
 
 # psycopg2
 # - Standard PostgreSQL adapter.
@@ -158,4 +158,4 @@ duckdb
 # - MySQL client library.
 # - Needed if DATABASE_TYPE=mysql.
 # Uncomment the line below to install PyMySQL.
-# PyMySQL
+PyMySQL
