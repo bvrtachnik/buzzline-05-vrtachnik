@@ -1,10 +1,9 @@
 """
-file_consumer_case.py
+consumer_vrtachnik.py
 
-Consume json messages from a live data file. 
-Insert the processed messages into a database.
+Consume JSON messages from a live data file and insert processed results into SQLite.
 
-Example JSON message
+Example JSON message:
 {
     "message": "I just shared a meme! It was amazing.",
     "author": "Charlie",
@@ -15,47 +14,65 @@ Example JSON message
     "message_length": 42
 }
 
-Database functions are in consumers/db_sqlite_case.py.
-Environment variables are in utils/utils_config module. 
+Environment variables are read via utils.utils_config.
+SQLite helpers are in consumers/sqlite_consumer_case.py.
 """
 
-#####################################
-# Import Modules
-#####################################
-
-# import from standard library
+# =========================
+# Imports
+# =========================
 import json
 import pathlib
 import sys
 import time
 
-# import from local modules
 import utils.utils_config as config
 from utils.utils_logger import logger
 from .sqlite_consumer_case import init_db, insert_message
 
-#####################################
-# Function to process a single message
-# #####################################
+
+# =========================
+# Helpers
+# =========================
+def classify_sentiment(score: float) -> str:
+    """Map a numeric sentiment score [-1.0, 1.0] to a readable label."""
+    if score <= -0.60:
+        return "Very Negative"
+    elif score < -0.20:
+        return "Negative"
+    elif score <= 0.20:
+        return "Neutral"
+    elif score < 0.60:
+        return "Positive"
+    else:
+        return "Very Positive"
 
 
-def process_message(message: str) -> None:
+# =========================
+# Process a single message
+# =========================
+def process_message(message: dict) -> dict | None:
     """
-    Process and transform a single JSON message.
-    Converts message fields to appropriate data types.
-
-    Args:
-        message (str): The JSON message as a string.
+    Convert fields to appropriate types and add derived insights.
+    Returns a dict ready for insertion or None on error.
     """
     try:
+        sentiment = float(message.get("sentiment", 0.0))
+        msg_len = int(message.get("message_length", 0))
+
         processed_message = {
             "message": message.get("message"),
             "author": message.get("author"),
             "timestamp": message.get("timestamp"),
             "category": message.get("category"),
-            "sentiment": float(message.get("sentiment", 0.0)),
+            "sentiment": sentiment,
             "keyword_mentioned": message.get("keyword_mentioned"),
-            "message_length": int(message.get("message_length", 0)),
+            "message_length": msg_len,
+
+            # Added insights for this project focus:
+            "sentiment_label": classify_sentiment(sentiment),
+            # Simple intensity proxy: stronger polarity and longer text increase score
+            "engagement_score": abs(sentiment) * msg_len,
         }
         logger.info(f"Processed message: {processed_message}")
         return processed_message
@@ -64,21 +81,16 @@ def process_message(message: str) -> None:
         return None
 
 
-#####################################
-# Consume Messages from Live Data File
-#####################################
-
-
-def consume_messages_from_file(live_data_path, sql_path, interval_secs, last_position):
+# =========================
+# Consume from live file
+# =========================
+def consume_messages_from_file(live_data_path: pathlib.Path,
+                               sql_path: pathlib.Path,
+                               interval_secs: int,
+                               last_position: int) -> int:
     """
-    Consume new messages from a file and process them.
-    Each message is expected to be JSON-formatted.
-
-    Args:
-    - live_data_path (pathlib.Path): Path to the live data file.
-    - sql_path (pathlib.Path): Path to the SQLite database file.
-    - interval_secs (int): Interval in seconds to check for new messages.
-    - last_position (int): Last read position in the file.
+    Read new lines from the live data file (JSON Lines), process each,
+    and write to SQLite. Exits after reaching EOF.
     """
     logger.info("Called consume_messages_from_file() with:")
     logger.info(f"   {live_data_path=}")
@@ -95,27 +107,18 @@ def consume_messages_from_file(live_data_path, sql_path, interval_secs, last_pos
     while True:
         try:
             logger.info(f"3. Read from live data file at position {last_position}.")
-            with open(live_data_path, "r") as file:
-                # Move to the last read position
+            with open(live_data_path, "r", encoding="utf-8") as file:
                 file.seek(last_position)
                 for line in file:
-                    # If we strip whitespace and there is content
-                    if line.strip():
+                    if not line.strip():
+                        continue
+                    message = json.loads(line.strip())
+                    processed_message = process_message(message)
+                    if processed_message:
+                        insert_message(processed_message, sql_path)
 
-                        # Use json.loads to parse the stripped line
-                        message = json.loads(line.strip())
-
-                        # Call our process_message function
-                        processed_message = process_message(message)
-
-                        # If we have a processed message, insert it into the database
-                        if processed_message:
-                            insert_message(processed_message, sql_path)
-
-                # Update the last position that's been read to the current file position
+                # EOF reached, remember position and return
                 last_position = file.tell()
-
-                # Return the last position to be used in the next iteration
                 return last_position
 
         except FileNotFoundError:
@@ -128,23 +131,15 @@ def consume_messages_from_file(live_data_path, sql_path, interval_secs, last_pos
         time.sleep(interval_secs)
 
 
-#####################################
-# Define Main Function
-#####################################
-
-
+# =========================
+# Main
+# =========================
 def main():
-    """
-    Main function to run the consumer process.
+    """Read config, initialize DB, then consume and store messages."""
+    logger.info("Starting consumer_vrtachnik.")
+    logger.info("Using utils_config for environment variables.")
 
-    Reads configuration, initializes the database, and starts consumption.
-
-    """
-    logger.info("Starting Consumer to run continuously.")
-    logger.info("Things can fail or get interrupted, so use a try block.")
-    logger.info("Moved .env variables into a utils config module.")
-
-    logger.info("STEP 1. Read environment variables using new config functions.")
+    logger.info("STEP 1. Read environment variables.")
     try:
         interval_secs: int = config.get_message_interval_seconds_as_int()
         live_data_path: pathlib.Path = config.get_live_data_path()
@@ -180,10 +175,6 @@ def main():
     finally:
         logger.info("TRY/FINALLY: Consumer shutting down.")
 
-
-#####################################
-# Conditional Execution
-#####################################
 
 if __name__ == "__main__":
     main()
